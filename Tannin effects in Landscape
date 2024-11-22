@@ -1,0 +1,634 @@
+# List of required libraries
+packages_to_load <- c(
+  "amt", "basemaps", "CropScapeR", "dplyr", "geodata", "ggmap", "ggplot2", "sf", 
+  "terra", "tidyterra", "tidyverse", "tigris", "tmap", "fasterize", "ctmm", 
+  "purrr", "glmmTMB", "metafor", "car", "raster", "lme4", "elevatr"
+)
+
+# Load libraries
+lapply(packages_to_load, library, character.only = TRUE)
+
+
+# Read the paddocks shapefile
+paddocks <- st_read("Paddocks/FinalPasture_BND_JuanGPS.shp")
+
+# Reproject paddocks shapefile to WGS84 (if necessary)
+paddocks_wgs84 <- st_transform(paddocks, crs = 4326)
+
+# Convert paddocks to terra vector
+paddocks_terra <- vect(paddocks_wgs84)
+
+# Create Blank Raster
+
+raster_template <- raster::raster(paddocks_wgs84, res = 3)# depending on what units your spatial object is in res (resolution) should probably be bigger. The finer the resolution the bigger the raster object will be
+
+#paddock_raster <- fasterize::fasterize(rsf2_treatments, template2, field = "Type_factor")
+
+# Download the DEM based on the bounding box of paddocks
+
+bbox <- st_bbox(paddocks_wgs84)
+farm_boundary <- data.frame(
+  x = c(bbox["xmin"], bbox["xmax"]),
+  y = c(bbox["ymin"], bbox["ymax"])
+)
+
+# Convert to sf and set CRS for farm boundary
+farm_boundary_sf <- st_as_sf(farm_boundary, coords = c("x", "y"), crs = 4326)
+
+# Download the DEM using the farm boundary
+DEM <- get_elev_raster(locations = farm_boundary_sf, z = 12)  # Adjust 'z' for resolution
+
+# Ensure the CRS of paddocks and DEM match
+crs(paddocks_terra)  # Should be same as DEM's CRS
+crs(DEM)
+
+# Reproject paddocks to match DEM CRS if necessary
+paddocks_terra <- terra::project(paddocks_terra, crs(DEM))
+
+# Convert DEM to SpatRaster if it is not already
+DEM <- rast(DEM)
+
+# Use the paddocks polygon to crop the DEM directly
+DEM_cropped <- mask(DEM, paddocks_terra)
+
+# Save the cropped DEM to file
+writeRaster(DEM_cropped, filename = "DEM_RichmondFarm_Cropped.tif", overwrite = TRUE)
+
+
+# Plot the extracted DEM for Richmond Farm with paddock boundary
+plot(DEM_cropped, main = "DEM for Richmond Farm", 
+     ext = ext(paddocks_terra),  # Set the extent to match the paddocks boundary
+     col = terrain.colors(100))  # Use a terrain color palette for better visualization
+
+# Add paddock boundary to the plot in red
+plot(st_geometry(paddocks_wgs84), add = TRUE, border = "red", lwd = 2)  # Add paddock boundary in red
+
+
+slope <- terra::terrain(DEM_cropped, "slope", unit = "degrees")
+
+terra::writeRaster(slope, filename = "Slope.tif", overwrite=TRUE)
+
+
+
+plot(slope, 
+     ext = ext(paddocks_terra),  # Set the extent to match the paddocks boundary
+     col = terrain.colors(100))  # Use a terrain color palette for better visualization
+
+
+
+# Step 1: Load paddocks shapefile
+paddocks <- st_read("Paddocks/FinalPasture_BND_JuanGPS.shp")
+
+# Step 2: Reproject paddocks to match the biomass raster's CRS (UTM Zone 12N)
+# Make sure biomass raster is loaded first to know its CRS
+biomass <- rast("Biomass1.tif")
+paddocks_utm <- st_transform(paddocks, crs = st_crs(biomass))
+
+# Step 3: Convert paddocks shapefile to terra vector object
+paddocks_terra <- vect(paddocks_utm)
+
+# Step 4: Check CRS and extents to ensure alignment
+print(crs(paddocks_terra))  # Check paddocks CRS
+print(crs(biomass))  # Check raster CRS
+print(ext(paddocks_terra))  # Check paddocks extent
+print(ext(biomass))  # Check raster extent
+
+# Step 5: Crop the biomass raster with the paddocks geometry
+biomass_cropped <- crop(biomass, paddocks_terra)
+
+# Step 6: Plot the cropped biomass raster to check the result
+plot(biomass_cropped)
+plot(biomass_cropped, 
+     ext = ext(paddocks_terra),  # Set the extent to match the paddocks boundary
+     col = terrain.colors(100))
+plot(paddocks_terra, add = TRUE, border = 'black')
+
+
+
+# Load necessary libraries
+library(lme4)      # For logistic regression (GLMM)
+
+# Step 1: Load paddocks shapefile and reproject
+paddocks <- st_read("Paddocks/FinalPasture_BND_JuanGPS.shp")
+paddocks_wgs84 <- st_transform(paddocks, crs = 4326)
+paddocks_terra <- vect(paddocks_wgs84)
+
+
+
+
+
+
+
+# Load necessary libraries
+library(terra)  # For raster operations
+library(sf)     # For spatial operations (shapefiles)
+
+# Step 1: Load the paddocks shapefile
+paddocks <- st_read("Paddocks/FinalPasture_BND_JuanGPS.shp")
+
+# Step 2: Reproject paddocks shapefile to WGS84 if needed
+paddocks_wgs84 <- st_transform(paddocks, crs = 4326)
+
+# Step 3: Convert paddocks to terra vector object
+paddocks_terra <- vect(paddocks_wgs84)
+
+# Step 4: Load the NDVI CSV file
+ndvi_data <- read.csv("NDVIA_1.csv")
+str(ndvi_data)
+
+# Check the first few rows of the dataset
+head(ndvi_data)
+
+# Check the range of NDVI values in the dataset to confirm expected variation
+summary(ndvi_data)
+
+# Step 5: Convert the NDVI data to a simple feature (sf) object
+ndvi_sf <- st_as_sf(ndvi_data, coords = c("Longitude", "Latitude"), crs = 4326)
+
+# Step 6: Define the extent of the raster based on the min/max of latitude and longitude in NDVI data
+ndvi_extent <- ext(min(ndvi_data$Longitude), max(ndvi_data$Longitude), 
+                   min(ndvi_data$Latitude), max(ndvi_data$Latitude))
+
+# Print the extent to check
+print(ndvi_extent)
+summary(ndvi_extent)
+ndvi_terra <- vect(ndvi_sf)
+
+# Create an empty SpatRaster with the same extent and a specified resolution (e.g., 100 meters)
+ndvi_raster_template <- rast(ndvi_extent, res = 0.0001)  # adjust the resolution as needed
+
+# Rasterize the SpatVector object using the template
+ndvi_raster <- rasterize(ndvi_terra, y = ndvi_raster_template, field = "NDVI")
+plot(ndvi_raster)
+plot(paddocks_terra, add = TRUE, border = 'black')
+
+ndvi_raster <- project(ndvi_raster, biomass)
+names(ndvi_raster)
+
+
+
+
+
+
+# Load necessary libraries
+library(lme4)      # For logistic regression (GLMM)
+
+# Step 1: Load paddocks shapefile and reproject
+paddocks <- st_read("Paddocks/FinalPasture_BND_JuanGPS.shp")
+paddocks_wgs84 <- st_transform(paddocks, crs = 4326)
+paddocks_terra <- vect(paddocks_wgs84)
+
+# Load raster data: DEM, NDVI, Biomass
+DEM <- rast("DEM_RichmondFarm_Cropped.tif")   # Slope from DEM
+ndvi_raster <- rast("NDVIA_1.tif")        # NDVI raster
+biomass <- rast("Biomass1.tif")               # Biomass raster
+
+
+
+# Step 2: Load cow movement data
+cow_data <- read.csv("Data1.csv")  # Ensure this file contains the cleaned data with no cows moving into the other paddocks
+
+# Convert cow data to sf object for spatial operations
+cow_sf <- st_as_sf(cow_data, coords = c("Longitude", "Latitude"), crs = 4326)
+
+# Reproject cow data to match the CRS of the rasters
+cow_sf_utm <- st_transform(cow_sf, crs = st_crs(DEM)) 
+
+# Step 3: Extract raster values at cow locations
+cow_sf_utm$slope <- extract(DEM, cow_sf_utm)
+cow_sf_utm$ndvi <- extract(ndvi_raster, cow_sf_utm)
+cow_sf_utm$biomass <- extract(biomass, cow_sf_utm)
+
+# Inspect the extracted data
+head(cow_sf_utm)
+
+# Step 4: Create a binary response variable (1 = selected, 0 = not selected)
+# This is a placeholder; modify as per your data (e.g., based on cow time spent in the paddock, distance to resource, etc.)
+cow_sf_utm$selected <- ifelse(cow_sf_utm$ndvi > 0.4, 1, 0)  # Example threshold for habitat selection based on NDVI
+
+
+# ###########Distance to points raster#############
+# I have tried to create point raster for location on feeding resource  for each paddocks, does this make sense??
+# Load required libraries
+# Load required libraries
+library(raster)
+library(sf)
+
+# Raw Data for 6 paddocks (Longitude, Latitude)
+distance <- data.frame(
+  Paddock = 1:6,
+  Longitude = c(-111.8000, -111.8013, -111.8036, -111.8039, -111.8019, -111.7989),
+  Latitude = c(41.88943, 41.88942, 41.88942, 41.88951, 41.88954, 41.88956)
+)
+
+# Define a raster template with appropriate extent and resolution
+raster_template <- raster(
+  xmn = min(distance$Longitude) - 0.01,  # Add buffer to extent
+  xmx = max(distance$Longitude) + 0.01,
+  ymn = min(distance$Latitude) - 0.01,
+  ymx = max(distance$Latitude) + 0.01,
+  resolution = 0.0003  # Adjust resolution (~100 meters per pixel)
+)
+
+# Set the Coordinate Reference System (WGS84)
+crs(raster_template) <- CRS("+proj=longlat +datum=WGS84")
+
+# Convert the data frame to an sf object
+points_sf <- st_as_sf(distance, coords = c("Longitude", "Latitude"), crs = "+proj=longlat +datum=WGS84")
+
+# Rasterize the points using the Paddock column as the field
+points_raster <- rasterize(points_sf, raster_template, field = "Paddock", background = NA)
+
+distance_to_feed <- terra::distance(points_raster)
+
+# Plot the raster with the paddock points
+plot(points_raster, main = "Paddock Points Raster")
+plot(points_sf, add = TRUE, pch = 16, col = "red")  # Overlay the points
+
+plot(distance_to_feed)
+  # Optionally, save the raster to a GeoTIFF file
+writeRaster(points_raster, "paddock_points_raster.tif", format = "GTiff", overwrite = TRUE)
+
+
+# Create random points 
+
+#################################HSF FOR 6 PADDOCKS#########################
+#### re-calling NVDI HAS AN ISSUE BETTER TO RUN IT HERE FIRST BEFORE RUNNING HSF TO REMOVE " ANY" ERROR
+
+
+
+# HSF P1
+cow_data1 <- filter(cow_data, Paddock == 1)
+
+Cow_track1 <- amt::make_track(tbl = cow_data1, .x = Longitude, .y = Latitude, all_cols = F, crs = "EPSG:4326")
+
+# Generate random points with N= 10*observed
+cow_random_pts1 <- random_points(Cow_track1, n = nrow(Cow_track1) * 10, type = 'random', presence = Cow_track1)
+
+plot(cow_random_pts1)
+
+# Extract raster values for the random points
+rsf <- cow_random_pts1 %>%
+  amt::extract_covariates(biomass_cropped) %>%
+  amt::extract_covariates(slope) %>%
+  amt::extract_covariates(ndvi_raster)%>%
+amt::extract_covariates(distance_to_feed)%>%
+  dplyr::mutate(
+    weight = ifelse(case_, 1, 1e3)  # Add weights: 1 for used points, 1000 for random points
+  )
+
+# Print the first 3 rows for inspection
+print(rsf, n = 3, width = Inf)
+
+# Correct weight assignment to the rsf dataset
+#With Weight = 1000, the model shows significant predictors but a high Residual Deviance (42,092), 
+#indicating overfitting. Weight = 100 strikes a balance, maintaining significance with a lower Residual Deviance (44,092) 
+#and more reasonable AIC (42,100). Weight = 10 results in the highest AIC (45,000) and Residual Deviance (47,000), 
+#with afgAGB only marginally significant, suggesting it doesn't effectively emphasize random points.
+
+rsf$weight <- ifelse(rsf$case_, 1, 1000)
+
+# Fit a weighted logistic regression model using the specified habitat covariates
+m1 <- glm(case_ ~ scale(afgAGB) + scale(slope) + scale(last) + scale(layer), 
+          data = rsf, 
+          weights = weight,  # Apply the weights
+          family = binomial(link = "logit"))
+summary(m1)
+
+
+
+
+
+
+### HSF P2
+Cow_data2 <- filter(cow_data, Paddock == 2)
+
+Cow_track2 <- amt::make_track(tbl = Cow_data2, .x = Longitude, .y = Latitude, all_cols = F, crs = "EPSG:4326")
+
+# Generate random points with N= 20*observed
+cow_random_pts2 <- random_points(Cow_track2, n = nrow(Cow_track2) * 10, type = 'random', presence = Cow_track2)
+
+plot(cow_random_pts2)
+
+# Extract raster values for the random points
+rsf <- cow_random_pts2 %>%
+  amt::extract_covariates(biomass_cropped) %>%
+  amt::extract_covariates(slope) %>%
+  amt::extract_covariates(ndvi_raster)%>%
+  amt::extract_covariates(distance_to_feed)%>%
+  dplyr::mutate(
+    weight = ifelse(case_, 1, 1e3)  # Add weights: 2 for used points, 2000 for random points
+  )
+
+# Print the first 3 rows for inspection
+print(rsf, n = 3, width = Inf)
+
+
+
+rsf$weight <- ifelse(rsf$case_, 1, 1000)
+
+# Fit a weighted logistic regression model using the specified habitat covariates
+m2 <- glm(case_ ~ scale(afgAGB) + scale(slope) + scale(last) + scale(layer), 
+          data = rsf, 
+          weights = weight,  # Apply the weights
+          family = binomial(link = "logit"))
+summary(m2)
+
+
+
+### HSF P3
+
+Cow_data3 <- filter(cow_data, Paddock == 3)
+
+Cow_track3 <- amt::make_track(tbl = Cow_data3, .x = Longitude, .y = Latitude, all_cols = F, crs = "EPSG:4326")
+
+# Generate random points with N= 30*observed
+cow_random_pts3 <- random_points(Cow_track3, n = nrow(Cow_track3) * 10, type = 'random', presence = Cow_track3)
+
+plot(cow_random_pts3)
+
+# Extract raster values for the random points
+rsf <- cow_random_pts3 %>%
+  amt::extract_covariates(biomass_cropped) %>%
+  amt::extract_covariates(slope) %>%
+  amt::extract_covariates(ndvi_raster)%>%
+  amt::extract_covariates(distance_to_feed)%>%
+  dplyr::mutate(
+    weight = ifelse(case_, 1, 1e3)  # Add weights: 3 for used points, 3000 for random points
+  )
+
+# Print the first 3 rows for inspection
+print(rsf, n = 3, width = Inf)
+
+
+
+rsf$weight <- ifelse(rsf$case_, 1, 1000)
+
+# Fit a weighted logistic regression model using the specified habitat covariates
+m3 <- glm(case_ ~ scale(afgAGB) + scale(slope) + scale(last) + scale(layer), 
+          data = rsf, 
+          weights = weight,  # Apply the weights
+          family = binomial(link = "logit"))
+summary(m3)
+
+
+
+#### HSF 4
+
+
+
+Cow_data4 <- filter(cow_data, Paddock == 4)
+
+Cow_track4 <- amt::make_track(tbl = Cow_data4, .x = Longitude, .y = Latitude, all_cols = F, crs = "EPSG:4326")
+
+# Generate random points with N= 40*observed
+cow_random_pts4 <- random_points(Cow_track4, n = nrow(Cow_track4) * 10, type = 'random', presence = Cow_track4)
+
+plot(cow_random_pts4)
+
+# Extract raster values for the random points
+rsf <- cow_random_pts4 %>%
+  amt::extract_covariates(biomass_cropped) %>%
+  amt::extract_covariates(slope) %>%
+  amt::extract_covariates(ndvi_raster)%>%
+  amt::extract_covariates(distance_to_feed)%>%
+  dplyr::mutate(
+    weight = ifelse(case_, 1, 1e3)  # Add weights: 4 for used points, 4000 for random points
+  )
+
+# Print the first 4 rows for inspection
+print(rsf, n = 3, width = Inf)
+
+
+
+rsf$weight <- ifelse(rsf$case_, 1, 1000)
+
+# Fit a weighted logistic regression model using the specified habitat covariates
+m4 <- glm(case_ ~ scale(afgAGB) + scale(slope) + scale(last) + scale(layer), 
+          data = rsf, 
+          weights = weight,  # Apply the weights
+          family = binomial(link = "logit"))
+summary(m4)
+
+
+### HSF P5
+Cow_data5 <- filter(cow_data, Paddock == 5)
+
+Cow_track5 <- amt::make_track(tbl = Cow_data5, .x = Longitude, .y = Latitude, all_cols = F, crs = "EPSG:4326")
+
+# Generate random points with N= 50*observed
+cow_random_pts5 <- random_points(Cow_track5, n = nrow(Cow_track5) * 10, type = 'random', presence = Cow_track5)
+
+plot(cow_random_pts5)
+
+# Extract raster values for the random points
+rsf <- cow_random_pts5 %>%
+  amt::extract_covariates(biomass_cropped) %>%
+  amt::extract_covariates(slope) %>%
+  amt::extract_covariates(ndvi_raster)%>%
+  amt::extract_covariates(distance_to_feed)%>%
+  dplyr::mutate(
+    weight = ifelse(case_, 1, 1e3)  # Add weights: 5 for used points, 5000 for random points
+  )
+
+# Print the first 5 rows for inspection
+print(rsf, n = 3, width = Inf)
+
+
+
+rsf$weight <- ifelse(rsf$case_, 1, 1000)
+
+# Fit a weighted logistic regression model using the specified habitat covariates
+m5 <- glm(case_ ~ scale(afgAGB) + scale(slope) + scale(last) + scale(layer), 
+          data = rsf, 
+          weights = weight,  # Apply the weights
+          family = binomial(link = "logit"))
+summary(m5)
+
+
+### HSF P6
+Cow_data6 <- filter(cow_data, Paddock == 6)
+
+Cow_track6 <- amt::make_track(tbl = Cow_data6, .x = Longitude, .y = Latitude, all_cols = F, crs = "EPSG:4326")
+
+# Generate random points with N= 60*observed
+cow_random_pts6 <- random_points(Cow_track6, n = nrow(Cow_track6) * 10, type = 'random', presence = Cow_track6)
+
+plot(cow_random_pts6)
+
+# Extract raster values for the random points
+rsf <- cow_random_pts6 %>%
+  amt::extract_covariates(biomass_cropped) %>%
+  amt::extract_covariates(slope) %>%
+  amt::extract_covariates(ndvi_raster)%>%
+  amt::extract_covariates(distance_to_feed)%>%
+  dplyr::mutate(
+    weight = ifelse(case_, 1, 1e3)  # Add weights: 6 for used points, 6000 for random points
+  )
+
+# Print the first 6 rows for inspection
+print(rsf, n = 3, width = Inf)
+
+
+
+rsf$weight <- ifelse(rsf$case_, 1, 1000)
+
+# Fit a weighted logistic regression model using the specified habitat covariates
+m6 <- glm(case_ ~ scale(afgAGB) + scale(slope) + scale(last) + scale(layer), 
+          data = rsf, 
+          weights = weight,  # Apply the weights
+          family = binomial(link = "logit"))
+summary(m6)
+
+
+
+
+
+# Meta-analysis
+
+
+# Collect biomass model coefficients, SEs, and p-values for Treatment and Control groups
+biomass_coef_summary <- data.frame(
+  Variable = "Biomass",
+  Estimate = c(coef(m1)[2], coef(m2)[2], coef(m3)[2], coef(m4)[2], coef(m5)[2], coef(m6)[2]),
+  SE = c(summary(m1)$coefficients[2, 2], summary(m2)$coefficients[2, 2], 
+         summary(m3)$coefficients[2, 2], summary(m4)$coefficients[2, 2], 
+         summary(m5)$coefficients[2, 2], summary(m6)$coefficients[2, 2]),
+  P_Value = c(summary(m1)$coefficients[2, 4], summary(m2)$coefficients[2, 4], 
+              summary(m3)$coefficients[2, 4], summary(m4)$coefficients[2, 4], 
+              summary(m5)$coefficients[2, 4], summary(m6)$coefficients[2, 4]),
+  Treatment = c("Control", "Treatment", "Treatment", "Control", "Control", "Treatment")
+)
+
+# Collect slope model coefficients, SEs, and p-values for Treatment and Control groups
+slope_coef_summary <- data.frame(
+  Variable = "Slope",
+  Estimate = c(coef(m1)[3], coef(m2)[3], coef(m3)[3], coef(m4)[3], coef(m5)[3], coef(m6)[3]),
+  SE = c(summary(m1)$coefficients[3, 2], summary(m2)$coefficients[3, 2], 
+         summary(m3)$coefficients[3, 2], summary(m4)$coefficients[3, 2], 
+         summary(m5)$coefficients[3, 2], summary(m6)$coefficients[3, 2]),
+  P_Value = c(summary(m1)$coefficients[3, 4], summary(m2)$coefficients[3, 4], 
+              summary(m3)$coefficients[3, 4], summary(m4)$coefficients[3, 4], 
+              summary(m5)$coefficients[3, 4], summary(m6)$coefficients[3, 4]),
+  Treatment = c("Control", "Treatment", "Treatment", "Control", "Control", "Treatment")
+)
+
+# Collect NDVI model coefficients, SEs, and p-values for Treatment and Control groups
+ndvi_coef_summary <- data.frame(
+  Variable = "NDVI",
+  Estimate = c(coef(m1)[4], coef(m2)[4], coef(m4)[4], coef(m4)[4], coef(m5)[4], coef(m6)[4]),
+  SE = c(summary(m1)$coefficients[4, 2], summary(m2)$coefficients[4, 2], 
+         summary(m4)$coefficients[4, 2], summary(m4)$coefficients[4, 2], 
+         summary(m5)$coefficients[4, 2], summary(m6)$coefficients[4, 2]),
+  P_Value = c(summary(m1)$coefficients[4, 4], summary(m2)$coefficients[4, 4], 
+              summary(m4)$coefficients[4, 4], summary(m4)$coefficients[4, 4], 
+              summary(m5)$coefficients[4, 4], summary(m6)$coefficients[4, 4]),
+  Treatment = c("Control", "Treatment", "Treatment", "Control", "Control", "Treatment")
+)
+
+
+# Collect NDVI model coefficients, SEs, and p-values for Treatment and Control groups
+distance_coef_summary <- data.frame(
+  Variable = "Distance",
+  Estimate = c(coef(m1)[5], coef(m2)[5], coef(m5)[5], coef(m5)[5], coef(m5)[5], coef(m6)[5]),
+  SE = c(summary(m1)$coefficients[5, 2], summary(m2)$coefficients[5, 2], 
+         summary(m5)$coefficients[5, 2], summary(m5)$coefficients[5, 2], 
+         summary(m5)$coefficients[5, 2], summary(m6)$coefficients[5, 2]),
+  P_Value = c(summary(m1)$coefficients[5, 4], summary(m2)$coefficients[5, 4], 
+              summary(m5)$coefficients[5, 4], summary(m5)$coefficients[5, 4], 
+              summary(m5)$coefficients[5, 4], summary(m6)$coefficients[5, 4]),
+  Treatment = c("Control", "Treatment", "Treatment", "Control", "Control", "Treatment")
+)
+
+
+
+# Combine the coefficient summaries into one data frame
+coef_summary_combined <- rbind(biomass_coef_summary, slope_coef_summary, ndvi_coef_summary,distance_coef_summary)
+
+# Run meta-analysis for each variable (Biomass, Slope, NDVI) 
+# using random-effects model for Treatment vs Control
+
+# Biomass Meta-Analysis
+biomass_meta_trt <- rma(yi = Estimate, sei = SE, data = filter(coef_summary_combined[coef_summary_combined$Variable == "Biomass",],
+                                                           Treatment == "Treatment"), method = "EE")
+biomass_meta_con <- rma(yi = Estimate, sei = SE, data = filter(coef_summary_combined[coef_summary_combined$Variable == "Biomass",],
+                                                               Treatment == "Control"), method = "EE")
+
+
+
+# Slope Meta-Analysis
+
+slope_meta_trt <- rma(yi = Estimate, sei = SE, data = filter(coef_summary_combined[coef_summary_combined$Variable == "Slope",],
+                                                               Treatment == "Treatment"), method = "EE")
+slope_meta_con <- rma(yi = Estimate, sei = SE, data = filter(coef_summary_combined[coef_summary_combined$Variable == "Slope",],
+                                                               Treatment == "Control"), method = "EE")
+
+
+
+# NDVI Meta-Analysis
+ndvi_meta_trt <- rma(yi = Estimate, sei = SE, data = filter(coef_summary_combined[coef_summary_combined$Variable == "NDVI",],
+                                                              Treatment == "Treatment"), method = "EE")
+ndvi_meta_con <- rma(yi = Estimate, sei = SE, data = filter(coef_summary_combined[coef_summary_combined$Variable == "NDVI",],
+                                                             Treatment == "Control"), method = "EE")
+
+# Distance Meta-Analysis
+Distance_meta_trt <- rma(yi = Estimate, sei = SE, data = filter(coef_summary_combined[coef_summary_combined$Variable == "Distance",],
+                                                            Treatment == "Treatment"), method = "EE")
+Distance_meta_con <- rma(yi = Estimate, sei = SE, data = filter(coef_summary_combined[coef_summary_combined$Variable == "Distance",],
+                                                            Treatment == "Control"), method = "EE")
+
+
+# Print the results of each meta-analysis
+# Define a helper function to extract only Estimate and SE
+extract_estimates_se <- function(meta_object, variable, treatment) {
+  tibble(
+    Variable = variable,
+    Treatment = treatment,
+    Estimate = meta_object$b[1],
+    SE = meta_object$se[1]
+  )
+}
+
+# Extract results for all meta-analyses
+meta_estimates <- bind_rows(
+  extract_estimates_se(biomass_meta_trt, "Biomass", "Treatment"),
+  extract_estimates_se(biomass_meta_con, "Biomass", "Control"),
+  extract_estimates_se(slope_meta_trt, "Slope", "Treatment"),
+  extract_estimates_se(slope_meta_con, "Slope", "Control"),
+  extract_estimates_se(ndvi_meta_trt, "NDVI", "Treatment"),
+  extract_estimates_se(ndvi_meta_con, "NDVI", "Control"),
+  extract_estimates_se(Distance_meta_trt, "Distance", "Treatment"),
+  extract_estimates_se(Distance_meta_con, "Distance", "Control")
+)
+
+# Display the table
+print(meta_estimates)
+
+#Adjusted Estimate errors with for Long SE Bars
+
+
+ggplot(meta_estimates, aes(x = Variable, y = Estimate, color = Treatment)) +
+  # Larger dots
+  geom_point(position = position_dodge(width = 0.7), size = 5) +
+  # Amplified SE bars
+  geom_errorbar(aes(ymin = Estimate - SE * 10, ymax = Estimate + SE * 10), 
+                position = position_dodge(width = 0.7), width = 0.5, linewidth = 1) +
+  # Adjusted Y-axis for zoom
+  coord_cartesian(ylim = c(min(meta_estimates$Estimate - meta_estimates$SE * 10) - 0.1, 
+                           max(meta_estimates$Estimate + meta_estimates$SE * 10) + 0.1)) +
+  # Minimal theme with larger base font size
+  theme_minimal(base_size = 15) +
+  # Add title, x-axis, and y-axis labels
+  labs(title = "Estimates and SE of Variables by Treatment",
+       x = "Variable",
+       y = "Estimate",
+       color = "Treatment") +
+  # Custom colors for better visual distinction
+  scale_color_manual(values = c("blue", "red"))
+
+
+
+
+
+
+
